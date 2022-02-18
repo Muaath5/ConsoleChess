@@ -7,6 +7,9 @@
 #include <string>
 #include "Chess.h"
 #include "Constants.h"
+#include "Engine.h"
+#include "Pos.h"
+#include "Move.h"
 
 // End line
 #define endl '\n'
@@ -21,12 +24,13 @@ namespace ConsoleChess {
 namespace UI {
 	inline void clear_console();
 	inline void initialize_board(Board &b, GameMode &mode, HistoryMode &historyMode);
-	bool input_move(Board &board, Pos & from, Pos & to);
+	bool input_move(Board &board, Move &move);
 }
 inline string get_game_mode_name(GameMode mode);
 
 }
 
+using ConsoleChess::Move;
 using ConsoleChess::Board;
 using ConsoleChess::Pos;
 using std::cout;

@@ -7,7 +7,7 @@ namespace ConsoleChess {
 
 inline bool Board::will_get_check(Pos king, Pos from, Pos to)
 {
-	move_piece_internal(from, to, false, "");
+	move_piece_internal(from, to, false, "", false);
 	bool res = is_checked(king);
 	undo_last_move();
 	return res;
@@ -32,36 +32,38 @@ Error Board::move_piece(Pos from, Pos to)
 	// Checks if it was correct turn
 	if (piece.color == 0)
 		return Error::EmptyPlace;
-		//error("the place you choosed is empty!");
 
 	if (piece.color != turn) 
 		return Error::InvalidTurn;
-		//error("you can only move your own pieces!");
 
 	if (newPlace.color == turn)
 		return Error::CantEatYourPieces;
-		//error("can't eat your pieces!");
 
 	if (tolower(newPlace.type) == B_KING)
 		return Error::CantEatKings;
 
 	Pos king = (turn == BLACK ? blackKing : whiteKing);
 
-	if (false && will_get_check(king, from, to))
-		return Error::CantMoveAndKingNotProtected;
+	if (will_get_check(king, from, to))
+		return Error::KingWillBeChecked;
 
 	
-	if (false && is_checked(king) && !will_remove_check(king, from, to))
+	if (is_checked(king))
 	{
-		return Error::ProtectYourKing;
+		if (!will_remove_check(king, from, to))
+			return Error::ProtectYourKing;
 	}
 
 	switch (piece.type) {
 	case W_PAWN:
-		if ((!piece.moved && from_x == to_x && to_y == from_y + 2) || (from_x == to_x && to_y == from_y + 1) ||
-			(abs(from_x - to_x) == 1 && to_y == from_y - 1 && (board[to_y][to_x].color == BLACK || (from_y == 3 && board[from_y][to_x].color == BLACK && board[from_y][to_x].moved == 1)))) {
+		if (
+			(!piece.moved && from_x == to_x && to_y == from_y + 2) ||
+			(from_x == to_x && to_y == from_y + 1) ||
+			(abs(from_x - to_x) == 1 && to_y == from_y + 1) ||
+			(from_y == 3 && board[from_y][to_x].moved == 1)) {
+
 			bool enPassent = false;
-			if (from_y == 3 && board[from_y][to_x].color == BLACK && board[from_y][to_x].moved == 1)
+			if (from_y == 3 && board[from_y][to_x].moved == 1)
 				enPassent = true;
 			move_piece_internal(from, to, enPassent);
 			if (to_y == 0)
@@ -70,11 +72,16 @@ Error Board::move_piece(Pos from, Pos to)
 		}
 		return Error::InvalidMove;
 	case B_PAWN:
-		if ((!piece.moved && from_x == to_x && to_y == from_y - 2) || (from_x == to_x && to_y == from_y - 1) ||
-			(abs(from_x - to_x) == 1 && to_y == from_y + 1 && (board[to_y][to_x].color == WHITE || (from_y == 4 && board[from_y][to_x].color == WHITE && board[from_y][to_x].moved == 1)))) {
+
+		if (
+			(!piece.moved && from_x == to_x && to_y == from_y - 2) || // Two blocks forward
+			(from_x == to_x && to_y == from_y - 1) || // Moving forward
+			(abs(from_x - to_x) == 1 && to_y == from_y - 1) || // Eating
+			(from_y == 4 && board[from_y][to_x].moved == 1)) // En Passent
+		{
 			
 			bool enPassent = false;
-			if (from_y == 4 && board[from_y][to_x].color == WHITE && board[from_y][to_x].moved == 1)
+			if (from_y == 4 && board[from_y][to_x].moved == 1)
 				enPassent = true;
 			move_piece_internal(from, to, enPassent);
 			if (to_y == BOARD_SIZE - 1)
@@ -131,15 +138,28 @@ Error Board::move_piece(Pos from, Pos to)
 	return Error::Success;
 }
 
-inline void Board::move_piece_internal(Pos from, Pos to, bool enPassent, string new_history)
+inline void Board::move_piece_internal(Pos from, Pos to, bool enPassent, string new_history, bool real)
 {
 	Piece& piece = get_piece(from);
-	piece.moved++;
-	Piece cpy = piece;
 	Piece& eat = get_piece(to);
+	if (real)
+	{
+		if (turn == BLACK) // after swaping
+			full_moves++;
+		if (eat.type != EMPTY || tolower(piece.type) == B_PAWN)
+			halfmove_clock = 0;
+		else
+			halfmove_clock++;
+
+		piece.moved++;
+	}
+	Piece cpy = piece;
 	if (enPassent)
 		eat = get_piece(Pos(to.col, to.row + turn)); // + turn because it'll be -1 if black, +1 in white
-	history.push_back(Move(from, to, new_history, eat));
+
+	auto mv = Move(from, to, (enPassent ? MoveType::EnPassent : MoveType::Normal));
+	mv.eaten = eat;
+	history.push_back(mv);
 	eat = cpy;
 	piece = Piece();
 	
@@ -156,7 +176,28 @@ inline bool Board::will_remove_check(Pos king, Pos from, Pos to)
 	return res;
 }
 
-bool Board::king_side_castle()
+Error Board::move(Move move)
+{
+	if (move.type == MoveType::KingSideCastle)
+	{
+		if (!castle_king_side())
+		{
+			return Error::CastlingKingSideNotAllowed;
+		}
+		return Error::Success;
+	}
+	if (move.type == MoveType::QueenSideCastle)
+	{
+		if (!castle_queen_side())
+		{
+			return Error::CastlingQueenSideNotAllowed;
+		}
+		return Error::Success;
+	}
+	return move_piece(move.from, move.to);
+}
+
+bool Board::castle_king_side()
 {
 	Pos kingPos = (turn == BLACK ? blackKing : whiteKing);
 	int row = kingPos.row - 1;
@@ -178,8 +219,7 @@ bool Board::king_side_castle()
 	}
 	return false;
 }
-
-bool Board::queen_side_castle()
+bool Board::castle_queen_side()
 {
 	Pos kingPos = (turn == BLACK ? blackKing : whiteKing);
 	int row = kingPos.row - 1;
@@ -189,11 +229,7 @@ bool Board::queen_side_castle()
 	rookPos.col = 'H';
 	Piece rook = get_piece(rookPos);
 	// If they didn't move and all of between them is empty
-	if (!rook.moved && !king.moved &&
-		get_piece(Pos('B', row)).type == EMPTY &&
-		get_piece(Pos('C', row)).type == EMPTY &&
-		get_piece(Pos('D', row)).type == EMPTY &&
-		(char)tolower(rook.type) == B_ROOK && (char)tolower(king.type) == B_KING)
+	if (can_castle_queen_side(turn))
 	{
 		move_piece_internal(rookPos, Pos('D', row), false, "");
 		move_piece_internal(kingPos, Pos('C', row), false, "O-O-O");
@@ -201,6 +237,36 @@ bool Board::queen_side_castle()
 		return true;
 	}
 	return false;
+}
+
+bool Board::can_castle_queen_side(int color)
+{
+	Pos kingPos = (color == BLACK ? blackKing : whiteKing);
+	int row = kingPos.row - 1;
+	kingPos.row = row;
+	Piece king = get_piece(kingPos);
+	Pos rookPos = kingPos;
+	rookPos.col = 'H';
+	Piece rook = get_piece(rookPos);
+	return (!rook.moved && !king.moved &&
+		get_piece(Pos('B', row)).type == EMPTY &&
+		get_piece(Pos('C', row)).type == EMPTY &&
+		get_piece(Pos('D', row)).type == EMPTY &&
+		(char)tolower(rook.type) == B_ROOK && (char)tolower(king.type) == B_KING);
+}
+bool Board::can_castle_king_side(int color)
+{
+	Pos kingPos = (turn == color ? blackKing : whiteKing);
+	int row = kingPos.row - 1;
+	kingPos.row = row;
+	Piece king = get_piece(kingPos);
+	Pos rookPos = kingPos;
+	rookPos.col = 'H';
+	Piece rook = get_piece(rookPos);
+	return (!rook.moved && !king.moved &&
+		get_piece(Pos('F', row)).type == EMPTY &&
+		get_piece(Pos('G', row)).type == EMPTY &&
+		(char)tolower(rook.type) == B_ROOK && (char)tolower(king.type) == B_KING);
 }
 
 string Board::print_board() {
@@ -242,7 +308,8 @@ string Board::get_fen()
 			cnt++;
 			if (board[j][i].type == EMPTY)
 				continue;
-			if (cnt > 1)
+			cnt--;
+			if (cnt > 0)
 				fen += cnt+'0';
 			fen += board[j][i].type;
 			cnt = 0;
@@ -251,6 +318,31 @@ string Board::get_fen()
 			fen += cnt + '0';
 		started = true;
 	}
+	fen += (turn == WHITE ? " w " : " b ");
+	// If can castle
+	string castling = "";
+	if (!get_piece(whiteKing).moved)
+	{
+		if (!get_piece(A1).moved) castling += "K";
+		if (!get_piece(H1).moved) castling += "Q";
+	}
+	if (!get_piece(whiteKing).moved)
+	{
+		if (!get_piece(A1).moved) castling += "k";
+		if (!get_piece(H1).moved) castling += "q";
+	}
+
+	if (castling == "")
+		fen += "-";
+	else
+		fen += castling + " ";
+
+	// If Enpassent is available
+	fen += "-";
+
+	fen += " " + std::to_string(halfmove_clock);
+
+	fen += " " + std::to_string(full_moves);
 	return fen;
 }
 
@@ -289,6 +381,18 @@ void Board::initialize(GameMode mode)
 			board[i][blackRow].type = (char)tolower(board[i][blackRow].type);
 		}
 	}
+}
+
+bool Board::is_stalemate()
+{
+	// We must scan all pieces if can they move
+	return false;
+}
+
+bool Board::is_draw_by_repeation()
+{
+	// We must check history
+	return false;
 }
 
 }

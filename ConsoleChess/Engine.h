@@ -1,19 +1,54 @@
 #pragma once
+
 #include <string>
-#include "Chess.h"
+#include "Move.h"
+#include <vector>
+#if _WINDOWS
+#include <Windows.h>
+#include <sstream>
+#include <strsafe.h>
+#include <iostream>
+#endif
+
 
 using std::string;
-using namespace std;
+using std::exception;
 
 namespace ConsoleChess {
 
 namespace Engine {
 
-string engine_app = "stockfish.exe";
+    // An engine that uses UCI
+    struct Engine {
+    private:
+#ifdef _WINDOWS
+        HANDLE cinRead, cinWrite, coutRead, coutWrite;
+        STARTUPINFO startupInfo;
+        bool create_pipes();
+        bool create_processors();
+        void show_last_error(string lpszFunction);
+#endif
 
-string engine_execute(string command);
-Move get_best_move(string fen, int depth = 22, int move_time = 1500);
+    public: 
+        string engine_app = "./stockfish.exe";
+        Engine(string app = "./stockfish.exe");
+        ~Engine();
 
+    protected:
+        string workingDir;
+        bool std_write(string command);
+        //string std_read();
+        string execute(string command);
+        PROCESS_INFORMATION processInfo;
+
+    public:
+        Move get_best_move(string fen);
+        bool is_ready();
+        void uci_new_game();
+    };
+
+
+    std::vector<string> str_split(string str, char split);
+    inline bool str_starts_with(string str, string first);
 }
-
 }

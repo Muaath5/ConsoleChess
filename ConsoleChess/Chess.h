@@ -7,6 +7,8 @@
 #include "Piece.h"
 #include "Constants.h"
 #include "ChessError.h"
+#include "Pos.h"
+#include "Move.h"
 
 #define endl '\n'
 
@@ -17,40 +19,15 @@ using std::vector;
 
 enum GameMode { Normal = 0, Mode960 };
 enum HistoryMode { Disable = -1, Positions = 0, FEN = 1, Both = 2 };
+enum GameResult { StillPlaying = -10, WhiteCheckmated = -1, Draw = 0, BlackCheckmated = 1, Stalemate = 10, DrawByRepeatation = 11, DrawBy50Move = 12 };
 
 namespace ConsoleChess {
-	struct Pos {
-		char col;
-		int row;
-		Pos() : row(-1), col('N') {}
-		Pos(char c, int r) : row(r), col(c) {}
-		Pos(int c, int r) : col(c + 'A'), row(r) {}
-		bool operator==(const Pos& r)
-		{
-			return (this->col == r.col && this->row == r.row);
-		}
-		string to_string()
-		{
-			string s = "";
-			s += col;
-			s += row + '1';
-			return s;
-		}
-	};
-
-	struct Move {
-		Pos from, to;
-		Piece eaten = Piece();
-		string name = "\0";
-		Move(Pos f, Pos t) : from(f), to(t) {}
-		Move(Pos f, Pos t, string n) : from(f), to(t), name(n) {}
-		Move(Pos f, Pos t, string n, Piece p) : from(f), to(t), name(n), eaten(p) {}
-	};
-
 
 	struct Board {
 	public:
-		Board() {}
+		Board(GameMode mode = GameMode::Normal) {
+			initialize(mode);
+		}
 	protected:
 		// grid[0][0] == A1 == bottom-left
 		Piece board[BOARD_SIZE][BOARD_SIZE];
@@ -58,15 +35,10 @@ namespace ConsoleChess {
 		// King positions, used for getting checkmates
 		Pos whiteKing = Pos('E', 1), blackKing = Pos('E', 8);
 
-		bool checkmate = false;
-
-		inline void move_piece_internal(Pos from, Pos to, bool enPassent = false, string new_history = "\0");
-
+		inline void move_piece_internal(Pos from, Pos to, bool enPassent = false, string new_history = "\0", bool real = true);
 		inline bool will_get_check(Pos king, Pos from, Pos to);
-
 		inline void next_turn() { turn *= -1; }
 
-		string get_fen();
 
 		// For input validation, must be zero based
 		inline bool is_valid_pos(Pos pos) {
@@ -87,13 +59,23 @@ namespace ConsoleChess {
 		vector<Move> history;
 		HistoryMode history_mode = HistoryMode::Positions;
 
+		int current_checked_king = 0;
+
+		int full_moves = 0;
+
+		int halfmove_clock = 0;
+
+		GameResult result = GameResult::StillPlaying;
+
+		string get_fen();
+
 		inline string get_history(string separator = " ", string separatorBetweenPoses = "=>")
 		{
 			string his = "";
 			for (int i = 0; i < history.size(); i++)
 			{
-				if (history[i].name != "\0")
-					his += history[i].name + separator;
+				if (history[i].notation != "\0")
+					his += history[i].notation + separator;
 				else
 					his += history[i].from.to_string() + separatorBetweenPoses + history[i].to.to_string() + separator;
 			}
@@ -104,7 +86,7 @@ namespace ConsoleChess {
 			return board[pos.col - 'A'][pos.row];
 		}
 
-		inline string get_turn_name() {
+		string get_turn_name() {
 			return (turn == WHITE ? "White" : "Black");
 		}
 
@@ -193,65 +175,144 @@ namespace ConsoleChess {
 		}
 
 		// This method usually used with kings
-		// [UNCOMPLETED]
+		// It may be used in case of adding a manual engine
 		bool is_checked(Pos pos)
 		{
 			pos.row--;
-			int to_x = pos.col - 'A', to_y = pos.row;
-			bool result = false;
-			int eniemy = get_piece(pos).color * -1;
+			const int to_x = pos.col - 'A', to_y = pos.row;
+			const int eniemy = get_piece(pos).color * -1;
 			for (int i = 0; i < BOARD_SIZE; i++) {
 				for (int j = 0; j < BOARD_SIZE; j++) { 
-					if (board[i][j].color = eniemy) {
+					if (board[i][j].color == eniemy) {
 						switch ((char)tolower(board[i][j].type))
 						{
 						case B_PAWN:
-							result |= can_pawn_take(Pos(i, j), pos);
+							if (can_pawn_take(Pos(i, j), pos))
+								return true;
 							break;
 						case B_KNIGHT:
-							result |= can_knight_take(Pos(i, j), pos);
+							if (can_knight_take(Pos(i, j), pos))
+								return true;
 							break;
 						case B_ROOK:
-							result |= can_rook_take(Pos(i, j), pos);
+							if (can_rook_take(Pos(i, j), pos))
+								return true;
 							break;
 						case B_BISHOP:
-							result |= can_bishop_take(Pos(i, j), pos);
+							if (can_bishop_take(Pos(i, j), pos))
+								return true;
 							break;
 						case B_QUEEN:
-							result |= can_bishop_take(Pos(i, j), pos) || can_rook_take(Pos(i, j), pos);
+							if (can_bishop_take(Pos(i, j), pos) || can_rook_take(Pos(i, j), pos))
+								return true;
 							break;
 						}
 					}
-
-					// Break as soon as possible
-					if (result) return true;
 				}
 			}
-			return result;
+			return false;
 		}
 
-		inline void undo_last_move()
+		inline bool undo_last_move()
 		{
+			if (history.size() == 0)
+				return false;
 			// Here we may process the history, or save last board only
-			move_piece_internal(history[history.size() - 1].to, history[history.size() - 1].from);
+			move_piece_internal(history[history.size() - 1].to, history[history.size() - 1].from, false, "\0", false);
 			history.pop_back(); // Removing the new one
-			get_piece(history[history.size() - 1].from) = history[history.size() - 1].eaten;
+			get_piece(history[history.size() - 1].to) = history[history.size() - 1].eaten;
 			history.pop_back(); // Removing the last move
+			return true;
 		}
 
 		// Moves
+		Error move(Move move);
 		Error move_piece(Pos from, Pos to);
-		bool queen_side_castle();
-		bool king_side_castle();
+		bool castle_queen_side();
+		bool castle_king_side();
+		bool can_castle_king_side(int color);
+		bool can_castle_queen_side(int color);
 
-		inline bool checkmated()
+		inline bool is_game_finished()
 		{
-			return !can_move_without_check((turn == WHITE ? whiteKing : blackKing)) && false;
+			current_checked_king = 0;
+			if (is_stalemate())
+			{
+				result = GameResult::Stalemate;
+				return true;
+			}
+			if (halfmove_clock == 100)
+			{
+				result = GameResult::DrawBy50Move;
+				return true;
+			}
+			if (is_draw_by_repeation())
+			{
+				result = GameResult::DrawByRepeatation;
+				return true;
+			}
+			auto currentKing = (turn == WHITE ? whiteKing : blackKing);
+			if (is_checked(currentKing))
+			{
+				current_checked_king = turn * -1;
+				if (get_king_moves(currentKing).size() == 0)
+				{
+					// Checkmate!
+					result = (GameResult)turn;
+					return true;
+				}
+			}
+			return false;
 		}
 
-		bool can_move_without_check(Pos king)
-		{
-			return true;
+		vector<Pos> get_king_moves(Pos king) {
+			vector<Pos> moves;
+			king.col--;
+			int cnt = 3;
+			while (cnt--)
+			{
+				if (!is_checked(king))
+					moves.push_back(king);
+				king.row--;
+				if (!is_checked(king))
+					moves.push_back(king);
+				king.row+=2;
+				if (!is_checked(king))
+					moves.push_back(king);
+				king.col++;
+			}
+			return moves;
 		}
+
+		string get_checked_king_name()
+		{
+			return (current_checked_king == WHITE ? "White" : "Black");
+		}
+
+		string get_game_result()
+		{
+			switch (result)
+			{
+			case StillPlaying:
+				return "Still playing";
+			case WhiteCheckmated:
+				return "Checkmate! Black won";
+			case Draw:
+				return "Draw, both accepted!";
+			case BlackCheckmated:
+				return "Checkmate! Black won";
+			case Stalemate:
+				return "Stalemate, " + (string)(turn == WHITE ? "White" : "Black") + "doesn't have any legal move";
+			case DrawByRepeatation:
+				return "Draw by repetition";
+			case DrawBy50Move:
+				return "Draw by 50 move with no taking pieces or pawn advancing";
+			default:
+				return "Unknown";
+			}
+		}
+
+		bool is_draw_by_repeation();
+		bool is_stalemate();
 	};
 }

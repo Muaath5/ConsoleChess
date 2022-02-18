@@ -12,9 +12,11 @@ namespace ConsoleChess {
 		CantEatKings = 5,
 		CantEatYourPieces = 6,
 		ProtectYourKing = 7,
-		CantMoveAndKingNotProtected = 8,
+		KingWillBeChecked = 8,
 		CantMoveToSamePlace = 9,
-		PromotePawn = 10
+		PromotePawn = 10,
+		CastlingKingSideNotAllowed = 11,
+		CastlingQueenSideNotAllowed = 12
 	};
 
 	inline std::string error_to_string(Error err)
@@ -22,7 +24,7 @@ namespace ConsoleChess {
 		switch (err)
 		{
 		case ConsoleChess::Unknown:
-			return "unknown error";
+			return "Unknown error";
 		case ConsoleChess::Success:
 			return "success";
 		case ConsoleChess::InvalidMove:
@@ -32,22 +34,26 @@ namespace ConsoleChess {
 		case ConsoleChess::EmptyPlace:
 			return "you must choose a piece to move";
 		case ConsoleChess::OutsideBoard:
-			return "you must choose a piece to move";
+			return "outside of the board!";
 		case ConsoleChess::CantEatKings:
 			return "kings cannot be eaten";
 		case ConsoleChess::CantEatYourPieces:
 			return "can't eat your pieces";
 		case ConsoleChess::ProtectYourKing:
 			return "you must protect your king";
-		case ConsoleChess::CantMoveAndKingNotProtected:
+		case ConsoleChess::KingWillBeChecked:
 			return "cannot move this, it'll cause a check to your king";
 		case ConsoleChess::CantMoveToSamePlace:
 			return "cannot move to same place";
 		case ConsoleChess::PromotePawn:
 			return "promote your pawn";
+		case ConsoleChess::CastlingQueenSideNotAllowed:
+			return "castling queen side not allowed";
+		case ConsoleChess::CastlingKingSideNotAllowed:
+			return "castling king side not allowed";
 		default:
 			break;
 		}
-		return "Unknown error";
+		return "Error is unknown!";
 	}
 }

@@ -27,7 +27,7 @@ inline void initialize_board(Board &b, GameMode &mode, HistoryMode &historyMode)
 	}
 	if (modeStr == "disable" || modeStr == "no" || modeStr == "d" || modeStr == "n")
 		historyMode = HistoryMode::Disable;
-	if (modeStr == "both" || modeStr == "fenpositions" || modeStr == "fp" || modeStr == "pf")
+	if (modeStr == "both" || modeStr == "fenpositions" || modeStr == "fp" || modeStr == "pf" || modeStr == "all")
 		historyMode = HistoryMode::Both;
 	if (modeStr == "fen" || modeStr == "f" || modeStr == "FEN")
 		historyMode = HistoryMode::FEN;
@@ -47,43 +47,22 @@ inline void clear_console()
 #endif
 }
 
-// will return false in castling only
-bool input_move(Board &board, Pos &from, Pos &to)
+bool input_move(Board &board, Move &move)
 {
-InputError:
-	ask("Enter a move in format (E2E4): ", from.col);
-	string castle;
-	// If castling
-	if (from.col == 'O')
-	{
-		cin >> castle;
-		if (castle == "-O") {
-			if (!board.king_side_castle()) {
-				cout << "Castling in king's side isn't allowed!" << endl;
-				goto InputError;
-			}
-		}
-		else if (castle == "-O-O") {
-			if (!board.queen_side_castle()) {
-				cout << "Castling in queen's side isn't allowed!" << endl;
-				goto InputError;
-			}
-		}
-		else {
-			cout << "Castling must be in format O-O or O-O-O" << endl;
-			goto InputError;
-		}
-		return false;
-	}
-	else if (from.col == 'U')
-	{
+	string notation;
+	ask("Enter a move in format (E2E4): ", notation);
+	if (notation == "U" || notation == "undo")
 		board.undo_last_move();
-		ConsoleChess::UI::clear_console();
-		cout << "Undone last move!" << endl;
-		return false;
+	else
+	{
+		try {
+			move = Move(notation);
+		}
+		catch (...)
+		{
+			return false;
+		}
 	}
-	cin >> from.row >> to.col >> to.row;
-	from.col = toupper(from.col), to.col = toupper(to.col);
 	return true;
 }
 
@@ -106,29 +85,40 @@ inline string get_game_mode_name(GameMode mode)
 }
 
 GameMode mode = GameMode::Normal;
-HistoryMode historyMode = HistoryMode::Positions;
+HistoryMode historyMode = HistoryMode::Both;
 
 int main()
 {
 	Board board;
 	ConsoleChess::UI::initialize_board(board, mode, historyMode);
-	while (!board.checkmated())
+	while (!board.is_game_finished())
 	{
 		ConsoleChess::UI::clear_console();
 		cout << board.print_board() << endl;
 		cout << "Current turn is for " << board.get_turn_name() << endl;
 
+		if (board.current_checked_king != 0)
+		{
+			cout << board.get_checked_king_name() << " is checked!" << endl;
+		}
+
 		Pos from, to;
 		bool isErr = false;
 		ConsoleChess::Error err = ConsoleChess::Error::Success;
+		int depth = 10, movetime = 1500;
+		//auto engine = ConsoleChess::Engine::Engine();
+		//cout << engine.is_ready();
+		// engine.uci();
+		//engine.get_best_move();
 		do
 		{
+			Move mv;
 			if (isErr)
 				cout << "ERROR: " << ConsoleChess::error_to_string(err) << endl;
-			if (ConsoleChess::UI::input_move(board, from, to) == false) break;
-			err = board.move_piece(from, to);
+			if (ConsoleChess::UI::input_move(board, mv) == false) break;
+			err = board.move(mv);
 			isErr = true;
 		} while (err != ConsoleChess::Error::Success);
 	}
-	cout << board.get_turn_name() << " won!" << endl;
+	cout << board.get_game_result() << endl;
 }
